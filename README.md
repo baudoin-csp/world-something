@@ -41,7 +41,8 @@ conda create -n world python=3.11 -y && conda activate world   # any Python 3.10
 - downloads the CA-1M capture into `data/`
 
 The CA-1M download asks you to accept the dataset licence; `ACCEPT_CA1M_LICENSE=1 ./setup.sh`
-accepts it non-interactively. If compute nodes have no internet, point `HF_HOME` at a shared
+accepts it non-interactively. Open3D needs the system's EGL/GL libraries; on a minimal
+Ubuntu image, run `apt install libegl1 libgl1` first. If compute nodes have no internet, point `HF_HOME` at a shared
 folder for both setup and runs. To install the packages yourself, use `SKIP_PIP=1` (see
 `requirements.txt`).
 

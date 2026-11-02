@@ -104,7 +104,8 @@ def test_evaluation_end_to_end(phase1, tmp_path):
 
     T_p1_gt = geo["c2w"][0] @ np.linalg.inv(c2w_gt[0])
     boxes = synthetic.GT_BOXES[:2]
-    T = np.stack([T_p1_gt @ np.block([[synthetic.yaw_matrix(y), np.c_[p]], [0, 0, 0, 1]])
+    T = np.stack([T_p1_gt @ np.block([[synthetic.yaw_matrix(y), np.array(p)[:, None]],
+                                      [np.zeros((1, 3)), np.ones((1, 1))]])
                   for _, p, _, y in boxes])
     size = torch.tensor([s for _, _, s, _ in boxes], dtype=torch.float32)
     obbs = ObbTW.from_lmc(

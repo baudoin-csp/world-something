@@ -155,7 +155,7 @@ def evaluate_boxes(data_dir, gt, fused_csv, r, t, iou_thresh=0.25, main_size=0.5
     pred_labels = pred.text_string() if n_pred else []
     table, size_err = [], []
     for i, lab in enumerate(labels):
-        row = {"gt": lab, "size": np.round(sizes[i], 2).tolist(), "main": bool(is_main[i])}
+        row = {"gt": lab, "size": [round(float(x), 2) for x in sizes[i]], "main": bool(is_main[i])}
         if i in match:
             j = match[i]
             Rg = gt_obbs.T_world_object.R[i].numpy()
