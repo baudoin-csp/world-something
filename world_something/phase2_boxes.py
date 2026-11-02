@@ -116,9 +116,12 @@ def main(argv=None):
     args = p.parse_args(argv)
 
     os.makedirs(args.out, exist_ok=True)
+    n_photos = len([d for d in os.listdir(os.path.join(args.phase1, "boxer_input", BOXER_SEQ))
+                    if d.endswith(".wide")])
+    min_views = min(args.min_views, n_photos)  # a single photo can't need 2 views
     csv_path = run_boxer(args.phase1, args.out, args.labels, args.thresh2d, args.thresh3d,
                          args.skip_viz, args.force_cpu)
-    boxes = boxes_to_json(fuse(csv_path, args.min_views, args.fuse_conf))
+    boxes = boxes_to_json(fuse(csv_path, min_views, args.fuse_conf))
     with open(os.path.join(args.out, "boxes.json"), "w") as f:
         json.dump(boxes, f, indent=1)
     print(f"Phase 2: {len(boxes)} fused boxes -> {os.path.join(args.out, 'boxes.json')}")

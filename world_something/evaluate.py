@@ -65,11 +65,14 @@ def evaluate_cameras(gt, K_pred, c2w_pred):
     grav = [_angle_deg(Rp.T @ down, Rg.T @ down) for Rg, Rp in zip(c2w_gt[:, :3, :3], c2w_pred[:, :3, :3])]
     f_pred = (K_pred[:, 0, 0] + K_pred[:, 1, 1]) / 2
     f_gt = np.array([(g["K"][0, 0] + g["K"][1, 1]) / 2 for g in gt])
+    rot_med = float(np.median(rot_err))
+    if len(gt) < 3:  # alignment is trivial: scale and pose errors are not measured
+        s = ate = rot_med = None
     return {
         "num_frames": len(gt),
-        "sim3_scale": s, "sim3_scale_error": abs(s - 1.0),
+        "sim3_scale": s, "sim3_scale_error": None if s is None else abs(s - 1.0),
         "ate_sim3_m": ate,
-        "rotation_error_deg_median": float(np.median(rot_err)),
+        "rotation_error_deg_median": rot_med,
         "gravity_error_deg": float(np.median(grav)), "gravity_error_deg_max": float(np.max(grav)),
         "focal_error_median": float(np.median(np.abs(f_pred - f_gt) / f_gt)),
     }
