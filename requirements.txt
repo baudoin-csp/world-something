@@ -1,0 +1,13 @@
+# On top of Depth Anything 3's own requirements (installed from third_party/Depth-Anything-3).
+# Boxer runtime (it has no package metadata):
+opencv-python
+tqdm
+dill
+# Used directly here (also DA3 dependencies):
+numpy<2
+pillow
+scipy
+open3d
+evo
+# Tests:
+pytest

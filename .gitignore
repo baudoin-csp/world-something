@@ -218,3 +218,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# world-something: downloaded code, data and results
+third_party/
+data/
+outputs/
