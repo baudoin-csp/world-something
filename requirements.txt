@@ -15,3 +15,9 @@ pytest
 mujoco>=3.3
 anthropic>=2.0
 imageio[ffmpeg]
+# Phases 7-8 (renderer and fine-tune): diffusers with MiniMax-H3 (0.42+, from main until released)
+diffusers @ git+https://github.com/huggingface/diffusers.git
+peft
+accelerate
+transformers
+requests

@@ -11,8 +11,8 @@ rendered video of it.
 | 4 Assets | robots (MuJoCo Menagerie) and rough articulated models in place of boxes | done |
 | 5 Code world | MuJoCo simulation of scripted interactions at 960 Hz | done |
 | 6 Proxy video | flat-colour proxy frames along a camera path, chunked for the renderer | done |
-| 7 Renderer | MiniMax-H3 Ref2VA conditioned on proxy video + context photos | in progress |
-| 8 Training | proxy/real training pairs and the LoRA fine-tune | to do |
+| 7 Renderer | MiniMax-H3 Ref2VA conditioned on proxy video + context photos | done (needs GPUs for H3) |
+| 8 Training | proxy/real training pairs and the LoRA fine-tune | in progress |
 
 Almost everything is reused; this repo is the glue. Phases 1-2 below come first, then the
 later phases.
@@ -234,6 +234,34 @@ camera that sees the action best.
 
 Outputs: `proxy.mp4`, `manifest.json`, and per chunk `chunk_XX/{proxy.mp4, cameras.json,
 context.json, context/}`; with `--save-ids`, also `ids.npz` (object index per pixel, for training masks).
+
+## Phase 7: renderer
+
+```bash
+python -m world_something.phase7_render --phase6 outputs/room/phase6 --out outputs/room/phase7 --backend ibr     # CPU stand-in
+python -m world_something.phase7_render --phase6 ... --out ... --backend h3 --lora phase8/lora --adapter phase8/adapter.pt
+python -m world_something.phase7_render --phase6 ... --out ... --backend sglang --server http://localhost:30011
+python -m world_something.phase7_render --phase6 ... --out ... --backend h3 --tiny --steps 4             # tests the H3 code path on a CPU
+```
+
+Chunks are rendered in order and stitched; each later chunk is conditioned on what the previous
+one rendered for the 34 overlapping frames, and the overlap is dropped when stitching.
+
+| Backend | What it is | Needs |
+|---|---|---|
+| `h3` | Mundo's renderer (`h3.py`): MiniMax-H3 Ref2VA with the proxy video appended as clean latents on the target's own rotary grid (pixel-aligned), the context photos as reference images exactly where Ref2VA puts them (with their `<Picture i>` vision blocks in the text), the previous chunk's 34 frames as a clean 10-latent prefix, and Plücker rays of every row's camera through a zero-initialised adapter at `proj_in`. Euler sampling, 20 steps, H3's shift 12. | GPUs + the H3 weights; the LoRA/adapter from Phase 8 (untrained, the adapter is a no-op) |
+| `sglang` | zero-shot H3 Ref2VA through `sglang serve --model-variant ref2va`: the proxy video is `<Video 1>` (the source to re-render), the context photos are `<Picture i>`, and the previous chunk's frame is the first frame, written in H3's structured prompt format. `--dry-run` writes the requests only. | an SGLang server (4+ GPUs) |
+| `ibr` | no diffusion model: each proxy pixel is textured from the context photos by reprojection with occlusion tests; moving objects carry their texture with their rigid motion; robots and spawned objects stay in their proxy colour | CPU only |
+| `h3 --tiny` | the `h3` code path with random-weight H3 classes at tiny sizes (real VAE and transformer classes from diffusers) | CPU only |
+
+H3 facts this relies on (diffusers' `MiniMaxH3Transformer3DModel` and the Ref2VA layout): one
+packed sequence, `t = 1` is clean, the model predicts the data-ward velocity `x0 − noise`,
+anchors sit at `t = 0.999`; 17n+5 frames → 5n+2 latents, so a 124-frame chunk is 37 latent
+frames and the 34-frame prefix is exactly 10; 640×480 is 300 rows per latent frame (16× VAE,
+2×2 patches); at most 9 reference images.
+
+Outputs: `render.mp4`, `side_by_side.mp4` (proxy | render), `chunk_XX/render.mp4`,
+`render.json`; the sglang backend also keeps each `request.json`.
 
 ## Tests
 

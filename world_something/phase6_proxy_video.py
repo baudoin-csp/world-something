@@ -62,7 +62,8 @@ def main(argv=None):
     os.makedirs(args.out, exist_ok=True)
     write_video(os.path.join(args.out, "proxy.mp4"), frames["proxy"][:len(traj["qpos"])], traj["fps"])
 
-    manifest = {"fps": traj["fps"], "width": w, "height": h, "chunk_frames": args.chunk,
+    manifest = {"sim": os.path.abspath(args.sim), "fps": traj["fps"], "width": w, "height": h,
+                "chunk_frames": args.chunk,
                 "prefix_frames": args.prefix, "simulated_frames": len(traj["qpos"]),
                 "camera_path": args.path, "description": program.get("description", ""),
                 "palette": {k: "#%02x%02x%02x" % v for k, v in PALETTE.items()}, "chunks": []}
