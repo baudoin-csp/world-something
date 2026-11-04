@@ -1,0 +1,24 @@
+# accelerate launch --config_file configs/accelerate_fsdp.yaml -m world_something.phase8_train train ...
+# One node, 8 GPUs (Code World Model used 8 x H800). H3's 33B transformer is sharded block by block;
+# only the LoRA and the camera adapter are trained.
+compute_environment: LOCAL_MACHINE
+distributed_type: FSDP
+mixed_precision: bf16
+num_machines: 1
+num_processes: 8
+machine_rank: 0
+main_training_function: main
+rdzv_backend: static
+same_network: true
+use_cpu: false
+fsdp_config:
+  fsdp_auto_wrap_policy: TRANSFORMER_BASED_WRAP
+  fsdp_transformer_layer_cls_to_wrap: MiniMaxH3TransformerBlock
+  fsdp_sharding_strategy: FULL_SHARD
+  fsdp_backward_prefetch: BACKWARD_PRE
+  fsdp_forward_prefetch: false
+  fsdp_state_dict_type: FULL_STATE_DICT
+  fsdp_use_orig_params: true
+  fsdp_cpu_ram_efficient_loading: true
+  fsdp_sync_module_states: true
+  fsdp_offload_params: false

@@ -172,7 +172,8 @@ class MundoH3:
         if adapter:
             adapter_module.load_state_dict(torch.load(adapter, map_location="cpu"))
         if lora:
-            self.transformer.load_lora_adapter(lora, adapter_name="mundo")
+            folder, name = (lora, "pytorch_lora_weights.safetensors") if os.path.isdir(lora) else os.path.split(lora)
+            self.transformer.load_lora_adapter(folder, weight_name=name, adapter_name="mundo")
         self.transformer.to(self.device).eval()
         self.vae.to(self.device)
 

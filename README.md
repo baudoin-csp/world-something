@@ -12,7 +12,7 @@ rendered video of it.
 | 5 Code world | MuJoCo simulation of scripted interactions at 960 Hz | done |
 | 6 Proxy video | flat-colour proxy frames along a camera path, chunked for the renderer | done |
 | 7 Renderer | MiniMax-H3 Ref2VA conditioned on proxy video + context photos | done (needs GPUs for H3) |
-| 8 Training | proxy/real training pairs and the LoRA fine-tune | in progress |
+| 8 Training | proxy/real training pairs and the LoRA fine-tune | done (needs GPUs) |
 
 Almost everything is reused; this repo is the glue. Phases 1-2 below come first, then the
 later phases.
@@ -262,6 +262,53 @@ frames and the 34-frame prefix is exactly 10; 640×480 is 300 rows per latent fr
 
 Outputs: `render.mp4`, `side_by_side.mp4` (proxy | render), `chunk_XX/render.mp4`,
 `render.json`; the sglang backend also keeps each `request.json`.
+
+## Phase 8: training the renderer
+
+```bash
+# 8a. pairs from CA-1M captures: real video <-> proxy video along the same cameras
+python -m world_something.phase8_pairs --capture data/ca1m-val-42898570 --out outputs/pairs/42898570
+# 8b. latents + text once (one GPU), then the LoRA fine-tune (8 GPUs, FSDP)
+python -m world_something.phase8_train precompute --pairs outputs/pairs
+accelerate launch --config_file configs/accelerate_fsdp.yaml -m world_something.phase8_train train \
+    --pairs outputs/pairs --out outputs/phase8
+# use it
+python -m world_something.phase7_render --phase6 ... --out ... --backend h3 \
+    --lora outputs/phase8/lora --adapter outputs/phase8/adapter.pt
+```
+
+**Pairs** (`phase8_pairs.py`): a CA-1M capture has real frames with ground-truth poses, laser
+depth and boxes. Its proxy world is built exactly like Phase 3's initial proxy, from a pool of
+photos spread over the capture. Windows of 124 frames at 24 fps (capture frames repeated to 24
+fps) give the real video, the proxy along the same cameras, up to 9 context photos from the
+pool that lie *outside* the window, cameras relative to the first context photo, and a caption.
+A window is skipped when the proxy's depth agrees with the laser depth on less than
+`--min-agreement` of the pixels. CA-1M leaves some categories out (this capture has no beds,
+which drops agreement to ~40 % in windows that look at them), so for clean pairs run Phase 3's
+agent on `<out>/pool` and pass the refined scene with `--scene`.
+
+**Training** (`phase8_train.py`), the Code World Model recipe from the plan:
+
+| Setting | Value |
+|---|---|
+| trainable | rank-128 LoRA on `to_q/to_k/to_v/to_out.0` and `ff.net.0.proj/ff.net.2` of all 50 blocks (≈0.6B params), plus the zero-initialised camera/role adapter (≈3M at full size) |
+| loss | rectified flow on the generated target rows only (video loss only; no audio rows) |
+| noise | uniform σ with H3's exponential shift 12 (t = 1 − σ) |
+| optimiser | AdamW, LR 2e-5 with 100 warm-up steps and a cosine decay to 1e-6, 3,534 steps, grad clip 1.0 |
+| batch | one pair per GPU; 8 GPUs with FSDP (`configs/accelerate_fsdp.yaml`), bf16, gradient checkpointing |
+| continuation | half of the steps hold the first 10 latent frames (the 34-frame prefix) clean |
+
+`precompute` stores per pair the VAE latents (real, proxy, context photos), the Qwen3-VL
+presentation and every row's Plücker features, so training only loads the transformer
+(`transformer_ref`, the Ref2VA DiT). Outputs: `lora/pytorch_lora_weights.safetensors` (diffusers
+format, loadable with `load_lora_adapter`), `adapter.pt`, `train_log.jsonl`.
+
+`scripts/slurm_train.sbatch` and `scripts/slurm_h3_server.sbatch` are Slurm templates for one
+8-GPU training node and a 4-GPU SGLang Ref2VA server; adjust the GPU lines to your cluster.
+
+**Tested here without GPUs**: `--tiny` runs the same code with random-weight H3 classes at tiny
+sizes. On the CA-1M example, pairs → precompute → 30 training steps → rendering with the saved
+LoRA and adapter all run on a CPU. The H3-scale runs need the weights and GPUs.
 
 ## Tests
 

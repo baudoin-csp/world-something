@@ -319,10 +319,11 @@ def forward_velocity(transformer, layout, cond_rows, target_rows, t_target, cond
     timestep, idx = row_timesteps(layout, t_target)
     dev = target_rows.device
     video = target_rows if cond_rows is None else torch.cat([cond_rows.to(dev), target_rows])
-    proj = transformer.proj_in
+    inner = getattr(transformer, "module", transformer)  # DDP / FSDP wrappers
+    proj = inner.proj_in
     if isinstance(proj, ProjInWithCamera):
         proj.plucker, proj.roles = cond.plucker, layout.roles
-    audio = torch.zeros(1, 0, transformer.config.audio_in_channels, device=dev)
+    audio = torch.zeros(1, 0, inner.config.audio_in_channels, device=dev)
     out = transformer(hidden_states=video[None], audio_hidden_states=audio,
                       encoder_hidden_states=cond.text.to(dev), timestep=timestep.to(dev),
                       timestep_indices=idx.to(dev), token_tags=layout.token_tags.to(dev),
