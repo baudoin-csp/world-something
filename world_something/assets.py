@@ -111,6 +111,43 @@ def place_robot(scene, name, xy, yaw_deg=0.0, on=None, label=None):
     return obj
 
 
+SURFACES = ("table", "desk", "makeup vanity", "counter", "kitchen counter", "dresser", "cabinet",
+            "night stand", "nightstand", "side table", "coffee table", "dining table", "shelf")
+
+
+def free_floor_spot(scene, footprint, step=0.1, margin=0.1):
+    """(x, y, yaw_deg) on the floor with the most clearance from every object, facing the room centre."""
+    floor = scene.get("floor")
+    c, half = np.asarray(floor.center[:2]), np.asarray(floor.size[:2]) / 2.0 - max(footprint) / 2.0 - margin
+    R = np.array([[math.cos(floor.yaw), -math.sin(floor.yaw)], [math.sin(floor.yaw), math.cos(floor.yaw)]])
+    gx, gy = np.meshgrid(np.arange(-half[0], half[0] + 1e-9, step), np.arange(-half[1], half[1] + 1e-9, step))
+    pts = np.c_[gx.ravel(), gy.ravel()] @ R.T + c
+    clearance = np.full(len(pts), np.inf)
+    for o in scene.objects:
+        if o.proxy_class in ("floor", "ceiling") or o.bottom > 1.8:
+            continue
+        local = (pts - np.asarray(o.center[:2])) @ np.array([[math.cos(o.yaw), -math.sin(o.yaw)],
+                                                             [math.sin(o.yaw), math.cos(o.yaw)]])
+        out = np.maximum(np.abs(local) - np.asarray(o.size[:2]) / 2.0, 0.0)
+        clearance = np.minimum(clearance, np.linalg.norm(out, axis=1))
+    best = int(np.argmax(clearance - 0.05 * np.linalg.norm(pts - c, axis=1)))
+    x, y = pts[best]
+    return float(x), float(y), math.degrees(math.atan2(c[1] - y, c[0] - x))
+
+
+def surface_for_robot(scene):
+    """The largest table-height surface (top 0.5-1.1 m) with nothing tall on top: (object id, yaw_deg)."""
+    from world_something.scene import normalize_category
+
+    floor = scene.get("floor") if "floor" in scene else None
+    c = np.asarray(floor.center[:2]) if floor else np.zeros(2)
+    cands = [o for o in scene.things() if normalize_category(o.category) in SURFACES and 0.5 <= o.top <= 1.1]
+    if not cands:
+        return None
+    o = max(cands, key=lambda o: o.size[0] * o.size[1])
+    return o.id, math.degrees(math.atan2(c[1] - o.center[1], c[0] - o.center[0]))
+
+
 # --- rough procedural models ----------------------------------------------------------------------
 
 

@@ -4,8 +4,9 @@
       --rough --robot stretch3@1.2,0.4,90 --robot panda@on=makeup_vanity,180
 
   --rough               rough procedural models for every recognised category (assets.ROUGH_KIND)
-  --robot NAME@X,Y[,YAW] or NAME@on=OBJECT_ID[,YAW]
-                        a MuJoCo Menagerie robot: panda, google_robot, g1, stretch3
+  --robot NAME@X,Y[,YAW] or NAME@on=OBJECT_ID[,YAW] or NAME@auto
+                        a MuJoCo Menagerie robot: panda, google_robot, g1, stretch3; `auto` puts
+                        mobile robots on the freest floor spot and arms on the largest table
   --mesh ID=PATH        use a mesh (.obj/.stl) for object ID, e.g. a TRELLIS output
   --trellis-crops       write a crop of every object from the photo that shows it best, for an
                         image-to-3D model (TRELLIS) on a GPU machine: see `trellis` below
@@ -28,9 +29,18 @@ import numpy as np
 def parse_robot(arg, scene):
     from world_something.assets import ROBOTS, place_robot
 
+    from world_something.assets import free_floor_spot, surface_for_robot
+
     name, _, where = arg.partition("@")
     if name not in ROBOTS:
         raise SystemExit(f"unknown robot {name!r}; choose from {sorted(ROBOTS)}")
+    if where in ("", "auto"):  # mobile robots on free floor, arms on the best table-height surface
+        if not ROBOTS[name]["free"]:
+            found = surface_for_robot(scene)
+            if found:
+                return place_robot(scene, name, scene.get(found[0]).center[:2], found[1], on=found[0])
+        x, y, yaw = free_floor_spot(scene, ROBOTS[name]["footprint"])
+        return place_robot(scene, name, [x, y], yaw)
     parts = [p for p in where.split(",") if p]
     if parts and parts[0].startswith("on="):
         on = parts[0][3:]

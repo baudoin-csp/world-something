@@ -17,6 +17,22 @@ rendered video of it.
 Almost everything is reused; this repo is the glue. Phases 1-2 below come first, then the
 later phases.
 
+## Room + physics demo (all phases)
+
+```bash
+ORACLE=1 RENDER=ibr MUJOCO_GL=osmesa ./run_demo.sh   # no GPU: CA-1M ground truth stands in for Phases 1-2
+./run_demo.sh                                        # GPU: DA3 + Boxer for Phases 1-2 (sbatch scripts/slurm_demo.sbatch)
+```
+
+Twelve CA-1M photos of a bedroom become a proxy world (Phase 3). The demo then adds rough
+furniture models, a Stretch 3 on the freest floor spot and a Panda on the largest table (Phase 4).
+It simulates a ball dropping in, a stool being pushed, a drawer opening and both robots moving
+(Phase 5), renders the result in proxy colours along an orbit around the action (Phase 6), and
+renders that into video (Phase 7). `RENDER=ibr` textures the proxy from the photos on a CPU;
+`RENDER=h3` and `RENDER=sglang` use MiniMax-H3 on GPUs. Add `AGENT=1` for the Claude agent in
+Phase 3, or `PROMPT="..."` to have the Claude director write the physics.
+Results: `outputs/demo-ca1m-12f/phase6/proxy.mp4` and `phase7/{render,side_by_side}.mp4`.
+
 | Phase | Reused (pinned in `setup.sh`) | Added here |
 |---|---|---|
 | 1 Geometry | [Depth Anything 3](https://github.com/ByteDance-Seed/Depth-Anything-3) nested model (`DA3NESTED-GIANT-LARGE-1.1`): intrinsics, poses and depth, already in metres. Open3D RANSAC plane fit. | Floor plane → z axis up, floor at z = 0. Writes cameras, point cloud and Boxer's input. |
