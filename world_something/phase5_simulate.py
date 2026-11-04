@@ -37,12 +37,15 @@ def keyframes(world, traj, scene, n=6, long_side=512):
     return [(f"t = {traj['times'][i]:.2f} s (camera of photo {cam.name})", f) for i, f in zip(idx, frames)], moved
 
 
-def simulate(scene, program, settle_s=1.0):
+def simulate(scene, program, settle_s=1.0, fill_chunks=True):
     from world_something.codeworld import World
+    from world_something.proxy_video import chunk_frames
 
     world = World(scene)
     t0 = time.time()
     duration = world.load_program(program, settle_s=settle_s)
+    if fill_chunks:  # run on to the end of the last renderer chunk instead of freezing the end
+        duration = (chunk_frames(int(round(duration * world.fps)) + 1) - 1) / world.fps
     t1 = time.time()
     traj = world.run(duration)
     timing = {"build_and_settle_s": round(t1 - t0, 2), "simulate_s": round(time.time() - t1, 2),
@@ -61,6 +64,8 @@ def main(argv=None):
     p.add_argument("--review", type=int, default=1, help="director revisions after watching the result")
     p.add_argument("--effort", default="high", choices=["low", "medium", "high", "xhigh", "max"])
     p.add_argument("--settle", type=float, default=1.0, help="seconds to let the scene rest first")
+    p.add_argument("--exact-duration", action="store_true",
+                   help="stop at the program's duration instead of the end of the last 124-frame chunk")
     args = p.parse_args(argv)
 
     from world_something.codeworld import EventError, demo_program
@@ -89,7 +94,7 @@ def main(argv=None):
     for attempt in range(args.review + 3):
         scene = Scene.from_dict(base.to_dict())
         try:
-            world, traj, timing = simulate(scene, program, args.settle)
+            world, traj, timing = simulate(scene, program, args.settle, not args.exact_duration)
         except EventError as e:
             if director is None:
                 raise SystemExit(f"invalid program: {e}")

@@ -10,8 +10,8 @@ rendered video of it.
 | 3 Proxy world | a scene program of boxes + physics that matches the photos, refined by a Claude agent | done |
 | 4 Assets | robots (MuJoCo Menagerie) and rough articulated models in place of boxes | done |
 | 5 Code world | MuJoCo simulation of scripted interactions at 960 Hz | done |
-| 6 Proxy video | flat-colour proxy frames along a camera path, chunked for the renderer | in progress |
-| 7 Renderer | MiniMax-H3 Ref2VA conditioned on proxy video + context photos | to do |
+| 6 Proxy video | flat-colour proxy frames along a camera path, chunked for the renderer | done |
+| 7 Renderer | MiniMax-H3 Ref2VA conditioned on proxy video + context photos | in progress |
 | 8 Training | proxy/real training pairs and the LoRA fine-tune | to do |
 
 Almost everything is reused; this repo is the glue. Phases 1-2 below come first, then the
@@ -208,6 +208,32 @@ Outputs: `program.json`, `scene_sim.json` (spawned objects and settled poses, so
 the same model), `trajectory.npz` (qpos per frame and every object's pose), `sim.json` (settle
 report, event log, timings), `keyframes/`. On CA-1M with two robots, 6 s simulate in about 2 s on
 one CPU core.
+
+## Phase 6: proxy video
+
+```bash
+python -m world_something.phase6_proxy_video --sim outputs/room/phase5 --out outputs/room/phase6 \
+    [--path auto | static:I | dolly:I:D | photos:I,J,K | orbit:R:H | file:cams.json] [--save-ids]
+```
+
+The simulation is rendered along a camera path in the proxy palette, 24 fps, 640 px on the long
+side. Then it is cut the way the renderer consumes it, following Mundo:
+
+- **Chunks** of 124 frames (17·7 + 5, i.e. 37 latent frames for H3's 4× temporal VAE). Each
+  chunk after the first starts with the previous chunk's last 34 frames. Phase 5 runs the
+  simulation on to the end of the last chunk, so nothing has to be padded.
+- **Context photos**: up to 9 per chunk (Ref2VA's image limit). Photos are chosen greedily by how
+  much of the chunk's visible proxy surface they show, with occlusion. The first one is the
+  chunk's reference view.
+- **Cameras** are stored in the world frame and relative to the reference view
+  (`T_ref⁻¹ · T`), Mundo's alignment for the camera encoder.
+
+`--path auto` orbits 50° around the moving objects, at a radius and start angle that keep the
+camera inside the room and clear of every box. If no such orbit exists, it falls back to the photo
+camera that sees the action best.
+
+Outputs: `proxy.mp4`, `manifest.json`, and per chunk `chunk_XX/{proxy.mp4, cameras.json,
+context.json, context/}`; with `--save-ids`, also `ids.npz` (object index per pixel, for training masks).
 
 ## Tests
 
