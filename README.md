@@ -9,8 +9,8 @@ rendered video of it.
 | 2 Boxes | labelled, gravity-aligned 7-DoF 3D boxes | done |
 | 3 Proxy world | a scene program of boxes + physics that matches the photos, refined by a Claude agent | done |
 | 4 Assets | robots (MuJoCo Menagerie) and rough articulated models in place of boxes | done |
-| 5 Code world | MuJoCo simulation of scripted interactions at 960 Hz | in progress |
-| 6 Proxy video | flat-colour proxy frames along a camera path, chunked for the renderer | to do |
+| 5 Code world | MuJoCo simulation of scripted interactions at 960 Hz | done |
+| 6 Proxy video | flat-colour proxy frames along a camera path, chunked for the renderer | in progress |
 | 7 Renderer | MiniMax-H3 Ref2VA conditioned on proxy video + context photos | to do |
 | 8 Training | proxy/real training pairs and the LoRA fine-tune | to do |
 
@@ -167,6 +167,47 @@ pass the results back with `--mesh ID=<out>/meshes/ID.obj`.
 
 Outputs: `scene.json` (Phase 3's scene with `asset` fields and robots) and `previews/`
 (proxy colours next to a shaded MuJoCo render, from four of the photo cameras).
+
+## Phase 5: code world
+
+```bash
+python -m world_something.phase5_simulate --scene outputs/room/phase4/scene.json --out outputs/room/phase5 --demo
+python -m world_something.phase5_simulate --scene ... --out ... --program events.json
+ANTHROPIC_API_KEY=... python -m world_something.phase5_simulate --scene ... --out ... \
+    --prompt "the robot drives past the stool and a ball bounces across the room" --review 2
+```
+
+The scene is compiled to MuJoCo, stepped at 960 Hz and recorded at 24 fps, H3's output rate.
+What happens is an *event program*: a JSON list of timed events (`codeworld.py`).
+
+| Event | Fields |
+|---|---|
+| `spawn` | `label`, `shape` (box/sphere/cylinder), `size`, `position`, `velocity`, `mass`, `restitution`: a new (orange) object released at `at` |
+| `push` | `object`, `direction`, `force` (N), `duration` |
+| `throw` / `drop` / `place` | `object` + `velocity` / `height` / `position`, `yaw_deg` |
+| `open` | `object` (rough cabinet, drawers or door), `amount` 0-1, `duration` |
+| `robot_pose` | `robot`, `targets` {actuator or joint name: value}, `duration` |
+| `robot_reach` | `robot`, `target` [x, y, z] for the end effector (damped least-squares IK) |
+| `robot_drive` | `robot` (free base: `stretch3`, `g1`), `distance`, `turn_deg`, `duration` |
+
+Every event also has `at` (seconds). Example:
+`{"duration": 6, "events": [{"type": "push", "object": "stool", "direction": [-1, 0, 0], "force": 40, "at": 1.0, "duration": 0.5}]}`.
+
+- **Settling**: the scene first rests for 1 s. Objects that move are frozen in place and
+  reported (`sim.json`); they were unsupported or overlapping another box. Rest poses are written
+  back to `scene_sim.json`.
+- **Director** (`--prompt`, Claude Opus 5.5): writes the program as structured JSON from the
+  scene's objects and robots. With `--review N` it watches proxy keyframes of the simulated
+  result and revises the program up to N times. Invalid programs are sent back with the error.
+- Mobile robots follow their path kinematically, with the matching velocity so contacts still
+  push things. Stretch's wheel servos are too weak in this model to drive straight, and G1 has
+  no walking policy here: it is carried while its joints hold their pose. Arms (Panda, Google
+  Robot, G1, Stretch's lift/arm) are driven by their own position servos.
+
+Outputs: `program.json`, `scene_sim.json` (spawned objects and settled poses, so Phase 6 rebuilds
+the same model), `trajectory.npz` (qpos per frame and every object's pose), `sim.json` (settle
+report, event log, timings), `keyframes/`. On CA-1M with two robots, 6 s simulate in about 2 s on
+one CPU core.
 
 ## Tests
 
