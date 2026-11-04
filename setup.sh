@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # One-time setup, on a machine with internet (e.g. a cluster login node):
-#   1. third-party code at pinned commits (Depth Anything 3, Boxer) into third_party/
+#   1. third-party code at pinned commits (Depth Anything 3, Boxer, MuJoCo Menagerie robots)
+#      into third_party/
 #   2. Python packages into the active environment (Python 3.10-3.12)
 #   3. model weights: DA3 nested metric model (Hugging Face cache), Boxer/DINOv3/OWLv2 checkpoints
 #   4. example 1: the CA-1M capture val-42898570 into data/ (asks you to accept its licence;
@@ -11,6 +12,7 @@ cd "$(dirname "$0")"
 
 DA3_COMMIT=3d835ec1a5802d64a8b8b15f817a1ab54809bfe4    # ByteDance-Seed/Depth-Anything-3, 2026-07-27
 BOXER_COMMIT=1f86542dc342a4b1d474c87c97c5d1d6566d9148  # facebookresearch/boxer, 2026-07-27
+MENAGERIE_COMMIT=98a70c569c4c1b6da467a20012f766ee1f8dc521  # google-deepmind/mujoco_menagerie, 2026-11-02
 DA3_MODEL=${DA3_MODEL:-depth-anything/DA3NESTED-GIANT-LARGE-1.1}
 
 clone() {  # name url commit
@@ -23,6 +25,13 @@ clone() {  # name url commit
 mkdir -p third_party
 clone Depth-Anything-3 https://github.com/ByteDance-Seed/Depth-Anything-3 "$DA3_COMMIT"
 clone boxer https://github.com/facebookresearch/boxer "$BOXER_COMMIT"
+# Phase 4 robots: only the four robot folders of MuJoCo Menagerie (sparse checkout, ~200 MB)
+if [ ! -d third_party/mujoco_menagerie/.git ]; then
+  git clone -q --filter=blob:none --sparse https://github.com/google-deepmind/mujoco_menagerie third_party/mujoco_menagerie
+fi
+git -C third_party/mujoco_menagerie sparse-checkout set franka_emika_panda google_robot unitree_g1 hello_robot_stretch_3
+git -C third_party/mujoco_menagerie fetch -q origin
+git -C third_party/mujoco_menagerie checkout -q "$MENAGERIE_COMMIT"
 
 if [ "${SKIP_PIP:-0}" != 1 ]; then
   # DA3's documented install (pulls torch, xformers, open3d, evo, ...). If your cluster needs a

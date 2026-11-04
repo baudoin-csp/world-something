@@ -8,8 +8,8 @@ rendered video of it.
 | 1 Geometry | cameras and a metric, gravity-aligned point cloud | done |
 | 2 Boxes | labelled, gravity-aligned 7-DoF 3D boxes | done |
 | 3 Proxy world | a scene program of boxes + physics that matches the photos, refined by a Claude agent | done |
-| 4 Assets | robots (MuJoCo Menagerie) and rough articulated models in place of boxes | in progress |
-| 5 Code world | MuJoCo simulation of scripted interactions at 960 Hz | to do |
+| 4 Assets | robots (MuJoCo Menagerie) and rough articulated models in place of boxes | done |
+| 5 Code world | MuJoCo simulation of scripted interactions at 960 Hz | in progress |
 | 6 Proxy video | flat-colour proxy frames along a camera path, chunked for the renderer | to do |
 | 7 Renderer | MiniMax-H3 Ref2VA conditioned on proxy video + context photos | to do |
 | 8 Training | proxy/real training pairs and the LoRA fine-tune | to do |
@@ -141,6 +141,33 @@ ceiling `#bba2dc`, window `#56c8d8`, door `#ad7756`, unknown `#30343b`.
 Rendering headless needs `MUJOCO_GL=egl` (GPU nodes) or `MUJOCO_GL=osmesa` (CPU, `apt install
 libosmesa6`).
 
+## Phase 4: assets and robots
+
+```bash
+python -m world_something.phase4_assets --scene outputs/room/phase3/scene.json --out outputs/room/phase4 \
+    --rough --robot stretch3@1.2,0.4,90 --robot panda@on=makeup_vanity,180
+```
+
+An object's `asset` field picks its model. Objects without one stay boxes.
+
+| Asset | What it is |
+|---|---|
+| `menagerie:<robot>` | [MuJoCo Menagerie](https://github.com/google-deepmind/mujoco_menagerie) robot, starting from its keyframe: `panda` (Franka arm, fixed base, put it on a table with `on=`), `google_robot`, `g1` (Unitree humanoid), `stretch3` (Hello Robot mobile manipulator). Galaxea R1 Pro, which Mundo also shows, is not in Menagerie. |
+| `rough:<kind>` | a procedural model fitted into the box, facing +x: `table`, `chair`, `stool`, `bed`, `sofa`, `shelf`, `cabinet` (hinged door), `drawers` (sliding drawer), `door` (hinged), `lamp`, `ball`, `cylinder`. `--rough` assigns one to every recognised category. |
+| `mesh:<path>` | an `.obj`/`.stl` scaled into the box, e.g. from TRELLIS. MuJoCo collides with its convex hull. |
+
+Robots are proxy class *new object* (orange): they are not in the photos. Every geom of an
+asset belongs to its object, so the proxy renderer still draws flat palette colours.
+
+TRELLIS image-to-3D (optional, GPU): `--trellis-crops` saves a crop of every object from the
+photo that shows most of it. Then, in an environment with
+[TRELLIS](https://github.com/microsoft/TRELLIS) installed, run
+`python -m world_something.phase4_assets trellis --crops <out>/crops --out <out>/meshes` and
+pass the results back with `--mesh ID=<out>/meshes/ID.obj`.
+
+Outputs: `scene.json` (Phase 3's scene with `asset` fields and robots) and `previews/`
+(proxy colours next to a shaded MuJoCo render, from four of the photo cameras).
+
 ## Tests
 
 ```bash
@@ -159,5 +186,6 @@ Phases 1-2 inputs are non-commercial:
 - Boxer code and weights: CC BY-NC 4.0
 - CA-1M data: CC BY-NC-ND 4.0
 
-Later phases: MuJoCo is Apache-2.0. The agent calls the Claude API under your Anthropic account's
-terms.
+Later phases: MuJoCo and MuJoCo Menagerie's robot models are Apache-2.0 (a few models carry their
+own licence; see each folder's LICENSE). TRELLIS is MIT. The agent calls the Claude API under your
+Anthropic account's terms.

@@ -18,7 +18,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 from world_something.cameras import CV_TO_GL, as4, project
-from world_something.scene import PALETTE, yaw_quat
+from world_something.scene import PALETTE, yaw_matrix, yaw_quat
 
 PIXEL_PITCH = 1e-5   # metres per pixel on MuJoCo's virtual sensor
 MAX_RENDER = 2048    # offscreen buffer size
@@ -48,13 +48,22 @@ class CompiledScene:
         spec.visual.global_.offheight = MAX_RENDER
         spec.worldbody.add_light(name="sun", pos=[0, 0, 6], dir=[0.2, 0.3, -1.0],
                                  type=mujoco.mjtLightType.mjLIGHT_DIRECTIONAL)
+        # Menagerie's recommended settings for its robots (stable grasping and contacts).
+        spec.option.integrator = mujoco.mjtIntegrator.mjINT_IMPLICITFAST
+        spec.option.cone = mujoco.mjtCone.mjCONE_ELLIPTIC
+        spec.option.impratio = 10.0
+        spec.option.noslip_iterations = 3
         asset_specs = asset_specs or {}
+        self.asset_specs = asset_specs
         self.obj_index = {o.id: i for i, o in enumerate(scene.objects)}
         self.body_names = {}
         for o in scene.objects:
             if o.id in asset_specs:
-                frame = spec.worldbody.add_frame(pos=list(o.center), quat=yaw_quat(o.yaw))
-                spec.attach(asset_specs[o.id], prefix=f"{o.id}/", frame=frame)
+                a = asset_specs[o.id]
+                offset = np.asarray(getattr(a, "offset", [0.0, 0.0, 0.0]), float)
+                pos = np.asarray(o.center, float) + yaw_matrix(o.yaw) @ offset
+                frame = spec.worldbody.add_frame(pos=list(pos), quat=yaw_quat(o.yaw))
+                spec.attach(getattr(a, "spec", a), prefix=f"{o.id}/", frame=frame)
                 continue
             geom_kw = dict(name=f"obj:{o.id}", type=mujoco.mjtGeom.mjGEOM_BOX,
                            size=list(np.maximum(o.half, 0.005)),
@@ -78,10 +87,25 @@ class CompiledScene:
         self.spec = spec
         self.model = spec.compile()
         self.data = mujoco.MjData(self.model)
+        self._apply_start_values(asset_specs)
         mujoco.mj_forward(self.model, self.data)
+        self.qpos_init, self.ctrl_init = self.data.qpos.copy(), self.data.ctrl.copy()
         self.cam_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_CAMERA, self.camera_name)
         self._build_maps(asset_specs)
         self._renderers = {}
+
+    def _apply_start_values(self, asset_specs):
+        """Joint positions and actuator targets from each asset's keyframe (e.g. a robot's home)."""
+        m, d = self.model, self.data
+        for oid, a in asset_specs.items():
+            for name, val in getattr(a, "qpos", {}).items():
+                j = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_JOINT, f"{oid}/{name}")
+                if j >= 0:
+                    d.qpos[m.jnt_qposadr[j]] = val
+            for name, val in getattr(a, "ctrl", {}).items():
+                u = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_ACTUATOR, f"{oid}/{name}")
+                if u >= 0:
+                    d.ctrl[u] = val
 
     def _build_maps(self, asset_specs):
         m = self.model
