@@ -2,6 +2,8 @@
 
   fetch   download and extract the capture with Boxer's own script (asks you to accept the licence)
   select  copy N evenly spaced frames into a plain photo folder: the pipeline's only input
+  oracle  write ground truth for the selected frames in Phase 1 and Phase 2's output formats, so
+          Phases 3-8 can be developed and debugged without a GPU (or with perfect inputs)
 
 Also holds the ground-truth readers used by evaluate.py. The pipeline itself never reads GT.
 """
@@ -85,6 +87,92 @@ def load_gt_frame(data_dir, tag):
     }
 
 
+# --- Oracle Phase 1-2 outputs (development only) ---------------------------------------------
+
+
+def _gravity_box(position, scale, R):
+    """CA-1M OBB -> gravity-aligned (center, size, yaw): the box axis closest to world z is up."""
+    R, scale = np.asarray(R, float), np.asarray(scale, float)
+    up = int(np.argmax(np.abs(R[2])))
+    x = [i for i in range(3) if i != up][0]
+    y = [i for i in range(3) if i not in (up, x)][0]
+    yaw = float(np.arctan2(R[1, x], R[0, x]))
+    return [float(v) for v in position], [float(scale[x]), float(scale[y]), float(scale[up])], yaw
+
+
+def _floor_height(z):
+    """Height of the lowest dense horizontal band of points (the floor)."""
+    lo = np.percentile(z, 0.5)
+    band = z[(z > lo - 0.05) & (z < lo + 0.10)]
+    hist, edges = np.histogram(band, bins=np.arange(lo - 0.05, lo + 0.101, 0.01))
+    i = int(np.argmax(hist))
+    return float((edges[i] + edges[i + 1]) / 2.0)
+
+
+# Small wall fixtures and annotations Boxer's taxonomy does not produce as objects.
+ORACLE_SKIP = {"wall", "object", "electrical outlet", "light switch", "plug", "motion sensor",
+               "door frame"}
+
+
+def oracle(capture_dir, frames_json, out_dir, max_depth=10.0):
+    """phase1/ (cameras.json, geometry.npz) and phase2/ (boxes.json) from CA-1M ground truth.
+
+    The world is shifted so that the floor is z = 0, as Phase 1 does; poses and depth are GT.
+    """
+    sel = _read_json(frames_json)
+    data_dir, tags = sel.get("data_dir") or find_data_dir(capture_dir), sel["tags"]
+    img_dir = os.path.join(os.path.dirname(os.path.abspath(frames_json)), "images")
+    frames = [load_gt_frame(data_dir, t) for t in tags]
+    pts = []
+    for fr in frames:
+        d = fr["depth"]
+        v, u = np.nonzero((d > 0) & (d < max_depth))
+        rays = np.linalg.inv(fr["K_depth"]) @ np.stack([u, v, np.ones_like(u)]).astype(float)
+        pts.append((fr["c2w"][:3, :3] @ (rays * d[v, u]) + fr["c2w"][:3, 3:4]).T)
+    floor = _floor_height(np.concatenate(pts)[:, 2])
+    shift = np.eye(4)
+    shift[2, 3] = -floor
+    p1, p2 = os.path.join(out_dir, "phase1"), os.path.join(out_dir, "phase2")
+    os.makedirs(p1, exist_ok=True)
+    os.makedirs(p2, exist_ok=True)
+    cams = {"world": {"units": "m", "up": [0, 0, 1], "floor_z": 0.0,
+                      "camera_convention": "OpenCV, camera-to-world"},
+            "model": "ca1m-ground-truth", "is_metric": True, "metric_scale_factor": 1.0,
+            "gravity": {"source": "CA-1M laser-scanner world (z up)", "floor_offset_m": floor},
+            "frames": []}
+    depth, Ks, c2ws, Kf = [], [], [], []
+    for tag, fr in zip(tags, frames):
+        c2w = shift @ fr["c2w"]
+        w, h = fr["size"]
+        cams["frames"].append({"name": tag, "file": os.path.join(img_dir, f"{tag}.png"),
+                               "width": w, "height": h, "K": fr["K"].tolist(), "c2w": c2w.tolist()})
+        d = np.where(fr["depth"] < max_depth, fr["depth"], 0.0)
+        depth.append(d)
+        Ks.append(fr["K_depth"])
+        c2ws.append(c2w)
+        Kf.append(fr["K"])
+    with open(os.path.join(p1, "cameras.json"), "w") as f:
+        json.dump(cams, f, indent=1)
+    np.savez_compressed(os.path.join(p1, "geometry.npz"), names=np.array(tags),
+                        depth=np.stack(depth).astype(np.float32), K=np.stack(Ks),
+                        c2w=np.stack(c2ws), K_full=np.stack(Kf))
+    visible = set()
+    for fr in frames:
+        visible.update(fr["visible_ids"])
+    boxes = []
+    for inst in _read_json(os.path.join(data_dir, "world.gt", "instances.json")):
+        if inst["id"] not in visible or inst["category"] in ORACLE_SKIP:
+            continue
+        center, size, yaw = _gravity_box(inst["position"], inst["scale"], inst["R"])
+        center[2] -= floor
+        boxes.append({"label": inst["category"], "score": 1.0, "center": [round(c, 4) for c in center],
+                      "size": [round(s, 4) for s in size], "yaw": round(yaw, 4), "gt_id": inst["id"]})
+    with open(os.path.join(p2, "boxes.json"), "w") as f:
+        json.dump(boxes, f, indent=1)
+    print(f"oracle: {len(tags)} frames, floor at {floor:.3f} m, {len(boxes)} boxes -> {out_dir}")
+    return p1, p2
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -96,11 +184,17 @@ def main(argv=None):
     s.add_argument("--capture", default=os.path.join(REPO_ROOT, "data", CAPTURE))
     s.add_argument("--out", required=True)
     s.add_argument("--num-frames", type=int, default=12)
+    o = sub.add_parser("oracle", help="ground truth as Phase 1/2 outputs (<out>/phase1, <out>/phase2)")
+    o.add_argument("--capture", default=os.path.join(REPO_ROOT, "data", CAPTURE))
+    o.add_argument("--frames", required=True, help="frames.json written by `select`")
+    o.add_argument("--out", required=True)
     args = p.parse_args(argv)
     if args.cmd == "fetch":
         fetch(args.data_root, accept_license=args.accept_license)
-    else:
+    elif args.cmd == "select":
         select(args.capture, args.out, args.num_frames)
+    else:
+        oracle(args.capture, args.frames, args.out)
 
 
 if __name__ == "__main__":
