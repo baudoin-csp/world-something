@@ -336,6 +336,15 @@ The tests use a synthetic room with exact cameras, depth and boxes in place of t
 check the gravity alignment, the intrinsics mapping, Boxer's loader reading Phase 1's output, and
 the evaluation. They need `third_party/` from `setup.sh` but no GPU or weights.
 
+Phases 3-8 have no unit tests yet. They were checked by running them on the CA-1M example on a
+CPU:
+- `ORACLE=1 RENDER=ibr ./run_demo.sh`
+- the agent and director tool loops with a scripted stand-in for the Claude API
+- the H3 path and the fine-tune with `--tiny` random weights
+- the SGLang requests with `--dry-run`
+
+Still to be run: the agent and director against the Claude API, and H3 at full size on GPUs.
+
 ## Licences
 
 Phases 1-2 inputs are non-commercial:

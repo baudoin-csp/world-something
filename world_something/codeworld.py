@@ -520,5 +520,17 @@ def demo_program(scene):
             target[2] = o.bottom + 0.35
             events.append({"type": "robot_reach", "robot": o.id, "target": target.round(3).tolist(),
                            "at": 0.5, "duration": 2.5})
-    return {"duration": 6.0, "events": events,
-            "description": "ball dropped on the bed, a push, a door opening, robots moving"}
+    said = []
+    for e in events:
+        if e["type"] == "spawn":
+            said.append(f"a ball drops in{' onto the bed' if bed else ''} and bounces across the floor")
+        elif e["type"] == "push":
+            said.append(f"the {scene.get(e['object']).label} is pushed across the floor")
+        elif e["type"] == "open":
+            said.append(f"the {scene.get(e['object']).label} opens")
+        elif e["type"] == "robot_drive":
+            said.append("a Stretch mobile robot drives forward, raising its lift and extending its arm")
+        elif e["type"] == "robot_reach":
+            said.append("a Franka Panda arm reaches forward")
+    text = "; ".join(said)
+    return {"duration": 6.0, "events": events, "description": (text[0].upper() + text[1:] + ".") if text else ""}
