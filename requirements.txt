@@ -11,3 +11,7 @@ open3d
 evo
 # Tests:
 pytest
+# Phases 3-6: proxy world, agent, simulation, proxy video
+mujoco>=3.3
+anthropic>=2.0
+imageio[ffmpeg]

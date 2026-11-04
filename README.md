@@ -1,11 +1,21 @@
 # world-something
 
-Phases 1 and 2 of the Mundo rebuild plan: from a few photos of a room to
-**(1)** cameras and a metric, gravity-aligned point cloud, and **(2)** labelled, gravity-aligned
-7-DoF 3D boxes of the objects in it.
+The Mundo rebuild plan: from a few photos of a room to a simulated, interactive world and a
+rendered video of it.
 
-Almost everything is reused. This repo is the glue: about 430 lines of Python for the two
-phases, and 340 more to download the example and check the results.
+| Phase | What it produces | Status |
+|---|---|---|
+| 1 Geometry | cameras and a metric, gravity-aligned point cloud | done |
+| 2 Boxes | labelled, gravity-aligned 7-DoF 3D boxes | done |
+| 3 Proxy world | a scene program of boxes + physics that matches the photos, refined by a Claude agent | done |
+| 4 Assets | robots (MuJoCo Menagerie) and rough articulated models in place of boxes | in progress |
+| 5 Code world | MuJoCo simulation of scripted interactions at 960 Hz | to do |
+| 6 Proxy video | flat-colour proxy frames along a camera path, chunked for the renderer | to do |
+| 7 Renderer | MiniMax-H3 Ref2VA conditioned on proxy video + context photos | to do |
+| 8 Training | proxy/real training pairs and the LoRA fine-tune | to do |
+
+Almost everything is reused; this repo is the glue. Phases 1-2 below come first, then the
+later phases.
 
 | Phase | Reused (pinned in `setup.sh`) | Added here |
 |---|---|---|
@@ -90,6 +100,47 @@ Phase 2 boxes are moved into the GT world by a rigid alignment with no scale cor
 scale error in Phase 1 counts against Phase 2. The targets are a first guess; change them in
 `TARGETS` in `world_something/evaluate.py`.
 
+## Phase 3: proxy world
+
+```bash
+python -m world_something.phase3_proxy --phase1 outputs/room/phase1 --phase2 outputs/room/phase2 \
+    --out outputs/room/phase3                       # deterministic proxy only
+ANTHROPIC_API_KEY=... python -m world_something.phase3_proxy ... --agent   # + agent refinement
+```
+
+The proxy world (`phase3/scene.json`) is the scene program every later phase reads: each object
+is a gravity-aligned box (`center`, `size`, `yaw`) with a palette class and physics (`movable`,
+`mass`, `friction`, `restitution`), plus the cameras of the photos.
+
+- **Initial proxy** (no network calls): Phase 2's boxes, a floor, walls and a ceiling estimated
+  from Phase 1's points (a wall only where points support it), objects snapped onto whatever
+  is under them, physics defaults per category (unsupported objects are marked as mounted).
+- **Agent** (`--agent`, Claude Opus 5.5): analysis by synthesis, as in Mundo. Each round a
+  read-only *reviewer* looks at every photo with the proxy overlaid and a depth-check image
+  (red = real surface missing from the proxy, blue = box where the photo sees through), then
+  accepts or lists findings. An *editor* fixes them with scene tools. The VLM never types
+  coordinates for a fit. It marks rectangles on photos, and `fit.py` places the box by least
+  squares; with three or more marks, one photo is held out and has to agree. The loop stops when the reviewer accepts,
+  depth agreement stops improving (and is reverted if edits break it), or the round/edit/time
+  budget runs out. Requests use server-side refusal fallbacks (`fallbacks="default"`).
+- **Rendering**: `mjscene.py` compiles the scene to MuJoCo and renders object ids, flat proxy
+  colours and depth from any OpenCV camera. The same code renders Phase 6's proxy videos.
+
+Outputs: `scene.json`, `initial_scene.json`, `renders/` (proxy, overlay and depth check per
+photo), `metrics.json` (depth agreement with Phase 1 per photo, before and after the agent) and
+`agent_log/` (every tool call and result, token usage).
+
+**Without a GPU**: `python -m world_something.ca1m oracle --frames <out>/frames.json --out <out>`
+writes CA-1M's ground truth (poses, laser depth, boxes) in Phase 1/2's output format, so Phases
+3-6 run on any machine. On `val-42898570` the ground truth has no bed. That makes it a useful
+agent test: the depth check shows the twin beds in red.
+
+Proxy palette: object `#eeeeee`, new object `#f39442`, floor `#707070`, wall `#a9b6c6`,
+ceiling `#bba2dc`, window `#56c8d8`, door `#ad7756`, unknown `#30343b`.
+
+Rendering headless needs `MUJOCO_GL=egl` (GPU nodes) or `MUJOCO_GL=osmesa` (CPU, `apt install
+libosmesa6`).
+
 ## Tests
 
 ```bash
@@ -102,8 +153,11 @@ the evaluation. They need `third_party/` from `setup.sh` but no GPU or weights.
 
 ## Licences
 
-All three are non-commercial:
+Phases 1-2 inputs are non-commercial:
 
 - DA3 nested weights: CC BY-NC 4.0
 - Boxer code and weights: CC BY-NC 4.0
 - CA-1M data: CC BY-NC-ND 4.0
+
+Later phases: MuJoCo is Apache-2.0. The agent calls the Claude API under your Anthropic account's
+terms.
